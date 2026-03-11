@@ -1,0 +1,7 @@
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/logo/OneShield_logo.png"
+  adaptive_icon_background: "#0A0E21"
+  adaptive_icon_foreground: "assets/logo/OneShield_logo.png"
+  min_sdk_android: 21
