@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:flutter/widgets.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:uuid/uuid.dart';
 import '../core/constants.dart';
@@ -61,10 +62,15 @@ class VaultService {
   }
 
   /// Notify all listeners (UI + SyncService)
+  /// Uses addPostFrameCallback to ensure UI rebuilds even from background sync
   void _notifyAll() {
     onDataChanged?.call();
-    for (final listener in _uiListeners) {
-      listener();
+    if (_uiListeners.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        for (final listener in List.from(_uiListeners)) {
+          listener();
+        }
+      });
     }
   }
 
