@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   # ─────────────────────────────────────────
   # Build Android APK
@@ -38,19 +41,19 @@ jobs:
         run: flutter build apk --release
 
       - name: Rename APK
-        run: mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/OneShield-${{ github.ref_name }}.apk
+        run: mv build/app/outputs/flutter-apk/app-release.apk OneShield-${{ github.ref_name }}.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: android-apk
-          path: build/app/outputs/flutter-apk/OneShield-${{ github.ref_name }}.apk
+          path: OneShield-${{ github.ref_name }}.apk
 
   # ─────────────────────────────────────────
-  # Build Windows EXE
+  # Build Windows Installer EXE
   # ─────────────────────────────────────────
   build-windows:
-    name: Build Windows EXE
+    name: Build Windows Installer
     runs-on: windows-latest
     steps:
       - name: Checkout code
@@ -68,14 +71,23 @@ jobs:
       - name: Build Windows
         run: flutter build windows --release
 
-      - name: Create ZIP
-        run: Compress-Archive -Path "build\windows\x64\runner\Release\*" -DestinationPath "OneShield-Windows-${{ github.ref_name }}.zip"
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
 
-      - name: Upload Windows artifact
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build Installer with Inno Setup
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion="${{ steps.version.outputs.version }}" "installer\oneshield_setup.iss"
+
+      - name: Upload Installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: windows-exe
-          path: OneShield-Windows-${{ github.ref_name }}.zip
+          name: windows-installer
+          path: dist/OneShield-Windows-${{ steps.version.outputs.version }}.exe
 
   # ─────────────────────────────────────────
   # Create GitHub Release
@@ -94,10 +106,10 @@ jobs:
           name: android-apk
           path: ./release-assets
 
-      - name: Download Windows EXE
+      - name: Download Windows Installer
         uses: actions/download-artifact@v4
         with:
-          name: windows-exe
+          name: windows-installer
           path: ./release-assets
 
       - name: Create GitHub Release
@@ -109,8 +121,10 @@ jobs:
             ## 🛡️ OneShield ${{ github.ref_name }}
 
             ### Downloads
-            - **📱 Android**: `OneShield-${{ github.ref_name }}.apk`
-            - **🖥️ Windows**: `OneShield-Windows-${{ github.ref_name }}.zip` (Extract & run `one_shield.exe`)
+            | Platform | File | How to Install |
+            |----------|------|----------------|
+            | 📱 Android | `OneShield-${{ github.ref_name }}.apk` | Download → Install → Allow if prompted |
+            | 🖥️ Windows | `OneShield-Windows-${{ github.ref_name }}.exe` | Download → Run Setup → Done! |
 
             ### What's New
             - Real-time Google Drive sync across devices
