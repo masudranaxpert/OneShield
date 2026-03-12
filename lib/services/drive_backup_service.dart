@@ -258,63 +258,38 @@ class DriveBackupService {
     }
   }
 
-  /// Get or create parent OneShield folder in Google Drive
-  /// Uses local cache to avoid creating duplicate folders
-  Future<String?> _getOrCreateFolder() async {
-    final config = vaultService.backupConfig;
-
-    // Step 1: Check cached backup folder ID
-    if (config.cachedBackupFolderId != null) {
-      if (await _verifyFolderExists(config.cachedBackupFolderId!)) {
-        return config.cachedBackupFolderId;
-      }
-      // Cache is stale, clear it
-      config.cachedBackupFolderId = null;
-      config.cachedParentFolderId = null;
-      await vaultService.saveBackupConfig(config);
-    }
-
-    // Step 2: Find or create parent folder
-    final parentId = await _findOrCreateFolder(AppConstants.driveParentFolder, null);
-    if (parentId == null) return null;
-    config.cachedParentFolderId = parentId;
-
-    // Step 3: Find or create backup subfolder
-    final backupId = await _findOrCreateFolder(AppConstants.defaultDriveFolder, parentId);
-    if (backupId != null) {
-      config.cachedBackupFolderId = backupId;
-      await vaultService.saveBackupConfig(config);
-    }
-    return backupId;
+  /// Get backup folder ID (must be set by user in settings)
+  String? _getBackupFolderId() {
+    return vaultService.backupConfig.cachedBackupFolderId;
   }
 
-  /// Get or create the Merge subfolder for sync
-  Future<String?> _getOrCreateMergeFolder() async {
-    final config = vaultService.backupConfig;
+  /// Get merge folder ID (must be set by user in settings)
+  String? _getMergeFolderId() {
+    return vaultService.backupConfig.cachedMergeFolderId;
+  }
 
-    // Check cache first
-    if (config.cachedMergeFolderId != null) {
-      if (await _verifyFolderExists(config.cachedMergeFolderId!)) {
-        return config.cachedMergeFolderId;
-      }
-      config.cachedMergeFolderId = null;
-      await vaultService.saveBackupConfig(config);
+  /// Extract Google Drive folder ID from a URL or raw ID
+  static String? extractFolderIdFromUrl(String input) {
+    input = input.trim();
+    if (input.isEmpty) return null;
+    
+    // If it's a Google Drive URL, extract the ID
+    // Formats:
+    //   https://drive.google.com/drive/folders/FOLDER_ID
+    //   https://drive.google.com/drive/folders/FOLDER_ID?usp=sharing
+    //   https://drive.google.com/drive/u/0/folders/FOLDER_ID
+    final regex = RegExp(r'folders/([a-zA-Z0-9_-]+)');
+    final match = regex.firstMatch(input);
+    if (match != null) {
+      return match.group(1);
     }
-
-    // Get parent folder (may also be cached)
-    String? parentId = config.cachedParentFolderId;
-    if (parentId == null || !await _verifyFolderExists(parentId)) {
-      parentId = await _findOrCreateFolder(AppConstants.driveParentFolder, null);
-      if (parentId == null) return null;
-      config.cachedParentFolderId = parentId;
+    
+    // If it looks like a raw folder ID (no slashes, no spaces)
+    if (!input.contains('/') && !input.contains(' ') && input.length > 10) {
+      return input;
     }
-
-    final mergeId = await _findOrCreateFolder(AppConstants.driveMergeFolder, parentId);
-    if (mergeId != null) {
-      config.cachedMergeFolderId = mergeId;
-      await vaultService.saveBackupConfig(config);
-    }
-    return mergeId;
+    
+    return null;
   }
 
   /// Verify a folder ID still exists on Google Drive (not trashed)
@@ -384,7 +359,7 @@ class DriveBackupService {
     try {
       if (!await ensureValidToken()) return false;
 
-      final folderId = await _getOrCreateFolder();
+      final folderId = _getBackupFolderId();
       if (folderId == null) return false;
 
       final config = vaultService.backupConfig;
@@ -465,7 +440,7 @@ class DriveBackupService {
     try {
       if (!await ensureValidToken()) return [];
 
-      final folderId = await _getOrCreateFolder();
+      final folderId = _getBackupFolderId();
       if (folderId == null) return [];
 
       final config = vaultService.backupConfig;
@@ -559,7 +534,7 @@ class DriveBackupService {
     try {
       if (!await ensureValidToken()) return false;
       
-      final mergeFolderId = await _getOrCreateMergeFolder();
+      final mergeFolderId = _getMergeFolderId();
       if (mergeFolderId == null) return false;
 
       final config = vaultService.backupConfig;
@@ -635,9 +610,6 @@ class DriveBackupService {
         }
       }
 
-      // 5. Also upload to Backups folder for safety
-      await uploadBackupSimple();
-      
       return true;
     } catch (e) {
       return false;

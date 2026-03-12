@@ -24,6 +24,7 @@ class SyncService {
   /// Initial sync when app starts or unlocks
   Future<void> initialSync() async {
     if (!vaultService.backupConfig.isLoggedIn) return;
+    if (vaultService.backupConfig.cachedMergeFolderId == null) return;
     await performSync();
   }
 
@@ -31,7 +32,9 @@ class SyncService {
   void _startPolling() {
     _pollingTimer?.cancel();
     _pollingTimer = Timer.periodic(const Duration(seconds: 60), (timer) {
-      if (vaultService.backupConfig.isLoggedIn && !_isSyncing) {
+      if (vaultService.backupConfig.isLoggedIn && 
+          vaultService.backupConfig.cachedMergeFolderId != null &&
+          !_isSyncing) {
         performSync();
       }
     });
@@ -39,6 +42,7 @@ class SyncService {
 
   void _onLocalDataChanged() {
     if (!vaultService.backupConfig.isLoggedIn) return;
+    if (vaultService.backupConfig.cachedMergeFolderId == null) return;
 
     // Faster debounce - 2 seconds
     _debounceTimer?.cancel();

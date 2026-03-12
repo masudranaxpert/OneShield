@@ -383,6 +383,9 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                 if (!backupConfig.isLoggedIn) ...[
                   _buildDriveLoginSection(),
                 ] else ...[
+                  // Drive Folder Links Setup
+                  _buildFolderLinkSection(backupConfig),
+                  const Divider(color: AppTheme.surfaceLight, height: 24),
                   // Auto backup toggle
                   _buildSettingToggle(
                     'Auto Backup',
@@ -1128,6 +1131,214 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
               ),
               overflow: TextOverflow.ellipsis,
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFolderLinkSection(dynamic backupConfig) {
+    final hasBackup = backupConfig.cachedBackupFolderId != null;
+    final hasMerge = backupConfig.cachedMergeFolderId != null;
+    final isConfigured = hasBackup && hasMerge;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(
+              isConfigured ? Icons.folder_special : Icons.folder_off,
+              color: isConfigured ? AppTheme.accentGreen : AppTheme.accentOrange,
+              size: 20,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    isConfigured ? 'Drive Folders Linked' : 'Drive Folders Not Set',
+                    style: TextStyle(
+                      color: isConfigured ? AppTheme.accentGreen : AppTheme.textPrimary,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                  ),
+                  Text(
+                    isConfigured
+                        ? 'Backup & Sync folders are configured'
+                        : 'Set folder links for backup & sync',
+                    style: const TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            TextButton(
+              onPressed: () => _showFolderSetupDialog(backupConfig),
+              child: Text(
+                isConfigured ? 'Edit' : 'Setup',
+                style: const TextStyle(
+                  color: AppTheme.accentCyan,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  void _showFolderSetupDialog(dynamic backupConfig) {
+    final backupController = TextEditingController(
+      text: backupConfig.cachedBackupFolderId ?? '',
+    );
+    final mergeController = TextEditingController(
+      text: backupConfig.cachedMergeFolderId ?? '',
+    );
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.surfaceDark,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.folder_special, color: AppTheme.accentCyan, size: 24),
+            SizedBox(width: 10),
+            Text(
+              'Drive Folder Setup',
+              style: TextStyle(color: AppTheme.textPrimary, fontSize: 18),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.accentCyan.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppTheme.accentCyan.withValues(alpha: 0.2)),
+                ),
+                child: const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'How to setup:',
+                      style: TextStyle(
+                        color: AppTheme.accentCyan,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
+                    SizedBox(height: 6),
+                    Text(
+                      '1. Open Google Drive in browser\n'
+                      '2. Create a folder named "OneShield_Backups"\n'
+                      '3. Create another folder named "OneShield_Merge"\n'
+                      '4. Right-click each folder → Copy link\n'
+                      '5. Paste the links below',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                        height: 1.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Backup Folder Link',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+              ),
+              const SizedBox(height: 6),
+              TextField(
+                controller: backupController,
+                style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: 'Paste folder link or ID...',
+                  hintStyle: const TextStyle(color: AppTheme.textMuted, fontSize: 13),
+                  filled: true,
+                  fillColor: AppTheme.primaryDark,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Merge/Sync Folder Link',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+              ),
+              const SizedBox(height: 6),
+              TextField(
+                controller: mergeController,
+                style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: 'Paste folder link or ID...',
+                  hintStyle: const TextStyle(color: AppTheme.textMuted, fontSize: 13),
+                  filled: true,
+                  fillColor: AppTheme.primaryDark,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final backupId = DriveBackupService.extractFolderIdFromUrl(backupController.text);
+              final mergeId = DriveBackupService.extractFolderIdFromUrl(mergeController.text);
+
+              if (backupId == null || mergeId == null) {
+                _showSnackBar('Invalid folder link. Please paste a valid Google Drive folder link.');
+                return;
+              }
+
+              backupConfig.cachedBackupFolderId = backupId;
+              backupConfig.cachedMergeFolderId = mergeId;
+              await widget.vaultService.saveBackupConfig(backupConfig);
+              
+              if (mounted) {
+                Navigator.pop(ctx);
+                setState(() {});
+                _showSnackBar('Drive folders linked successfully!');
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.accentCyan,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('Save'),
           ),
         ],
       ),
