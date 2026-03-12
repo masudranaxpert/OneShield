@@ -1231,7 +1231,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                 child: const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
+                    const Text(
                       'How to setup:',
                       style: TextStyle(
                         color: AppTheme.accentCyan,
@@ -1239,19 +1239,12 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                         fontSize: 13,
                       ),
                     ),
-                    SizedBox(height: 6),
-                    Text(
-                      '1. Open Google Drive in browser\n'
-                      '2. Create a folder named "OneShield_Backups"\n'
-                      '3. Create another folder named "OneShield_Merge"\n'
-                      '4. Right-click each folder → Copy link\n'
-                      '5. Paste the links below',
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 12,
-                        height: 1.5,
-                      ),
-                    ),
+                    const SizedBox(height: 8),
+                    _buildStepRow('1. Open Google Drive in browser'),
+                    _buildCopyStepRow('2. Create folder: ', 'OneShield_Backups'),
+                    _buildCopyStepRow('3. Create folder: ', 'OneShield_Merge'),
+                    _buildStepRow('4. Right-click folder → Copy link'),
+                    _buildStepRow('5. Paste the links below'),
                   ],
                 ),
               ),
@@ -1339,6 +1332,59 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
             child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStepRow(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Text(
+        text,
+        style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+      ),
+    );
+  }
+
+  Widget _buildCopyStepRow(String prefix, String folderName) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Row(
+        children: [
+          Text(
+            prefix,
+            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryDark,
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: AppTheme.surfaceLight),
+            ),
+            child: Text(
+              folderName,
+              style: const TextStyle(
+                color: AppTheme.accentCyan,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          InkWell(
+            onTap: () {
+              Clipboard.setData(ClipboardData(text: folderName));
+              _showSnackBar('Copied: $folderName');
+            },
+            borderRadius: BorderRadius.circular(4),
+            child: const Padding(
+              padding: EdgeInsets.all(4),
+              child: Icon(Icons.copy, size: 14, color: AppTheme.accentCyan),
+            ),
           ),
         ],
       ),
