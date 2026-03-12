@@ -238,7 +238,9 @@ class _EntryDetailScreenState extends State<EntryDetailScreen> {
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
-        child: Column(
+        child: DesktopResponsiveWrapper(
+          maxWidth: 600,
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Header
@@ -465,6 +467,7 @@ class _EntryDetailScreenState extends State<EntryDetailScreen> {
               ),
             ],
           ],
+        ),
         ),
       ),
     );

@@ -65,7 +65,9 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
-      child: Column(
+      child: DesktopResponsiveWrapper(
+        maxWidth: 600,
+        child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 16),
@@ -92,132 +94,149 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
-                _buildSettingToggle(
-                  'Device Authentication',
-                  'Use PIN, pattern, fingerprint or face to unlock',
-                  Icons.lock_person,
-                  masterConfig?.biometricEnabled ?? false,
-                  (value) async {
-                    await widget.vaultService.setBiometric(value);
-                    setState(() {});
-                  },
-                ),
+                // Mobile only: biometric
+                if (!Platform.isWindows)
+                  _buildSettingToggle(
+                    'Device Authentication',
+                    'Use PIN, pattern, fingerprint or face to unlock',
+                    Icons.lock_person,
+                    masterConfig?.biometricEnabled ?? false,
+                    (value) async {
+                      await widget.vaultService.setBiometric(value);
+                      setState(() {});
+                    },
+                  ),
+                // Windows only: lock on minimize to tray
+                if (Platform.isWindows)
+                  _buildSettingToggle(
+                    'Lock on Minimize',
+                    'Lock vault when minimized to system tray',
+                    Icons.lock_clock,
+                    backupConfig.lockOnMinimize,
+                    (value) async {
+                      backupConfig.lockOnMinimize = value;
+                      await widget.vaultService.saveBackupConfig(backupConfig);
+                      setState(() {});
+                    },
+                  ),
               ],
             ),
           ),
           const SizedBox(height: 20),
 
-          // Autofill Section
-          _buildSectionHeader('Autofill', Icons.auto_fix_high),
-          const SizedBox(height: 12),
-          GlassCard(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: _isAutofillEnabled
-                            ? AppTheme.accentGreen.withValues(alpha: 0.15)
-                            : AppTheme.accentOrange.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(8),
+          // Autofill Section (Mobile Only)
+          if (!Platform.isWindows) ...[
+            _buildSectionHeader('Autofill', Icons.auto_fix_high),
+            const SizedBox(height: 12),
+            GlassCard(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: _isAutofillEnabled
+                              ? AppTheme.accentGreen.withValues(alpha: 0.15)
+                              : AppTheme.accentOrange.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(
+                          _isAutofillEnabled ? Icons.check_circle : Icons.warning_amber,
+                          color: _isAutofillEnabled ? AppTheme.accentGreen : AppTheme.accentOrange,
+                          size: 20,
+                        ),
                       ),
-                      child: Icon(
-                        _isAutofillEnabled ? Icons.check_circle : Icons.warning_amber,
-                        color: _isAutofillEnabled ? AppTheme.accentGreen : AppTheme.accentOrange,
-                        size: 20,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _isAutofillEnabled
+                                  ? 'OneShield is your autofill provider'
+                                  : 'Autofill NOT enabled',
+                              style: const TextStyle(
+                                color: AppTheme.textPrimary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              _isAutofillEnabled
+                                  ? 'Passwords will auto-fill in browsers & apps'
+                                  : 'OneShield must be selected as system autofill provider',
+                              style: const TextStyle(
+                                color: AppTheme.textSecondary,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _isAutofillEnabled
-                                ? 'OneShield is your autofill provider'
-                                : 'Autofill NOT enabled',
-                            style: const TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            _isAutofillEnabled
-                                ? 'Passwords will auto-fill in browsers & apps'
-                                : 'OneShield must be selected as system autofill provider',
-                            style: const TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  if (!_isAutofillEnabled) ...[
+                    SizedBox(
+                      width: double.infinity,
+                      child: GradientButton(
+                        text: 'Set as Autofill Provider',
+                        icon: Icons.settings,
+                        gradient: const LinearGradient(
+                          colors: [AppTheme.accentCyan, AppTheme.accentPurple],
+                        ),
+                        onPressed: () async {
+                          await _autofillBridge.openAutofillSettings();
+                          // Wait and recheck multiple times
+                          for (var i = 0; i < 5; i++) {
+                            await Future.delayed(const Duration(seconds: 2));
+                            await _checkAutofillStatus();
+                            if (_isAutofillEnabled) break;
+                          }
+                        },
                       ),
                     ),
                   ],
-                ),
-                const SizedBox(height: 12),
-                if (!_isAutofillEnabled) ...[
+                  if (_isAutofillEnabled) ...[
+                    SizedBox(
+                      width: double.infinity,
+                      child: GradientButton(
+                        text: 'Sync Passwords Now',
+                        icon: Icons.sync,
+                        gradient: const LinearGradient(
+                          colors: [AppTheme.accentGreen, AppTheme.accentCyan],
+                        ),
+                        onPressed: () async {
+                          await _autofillBridge.syncCredentials();
+                          if (mounted) {
+                            _showSnackBar('Passwords synced for autofill!');
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  // Diagnostics button
                   SizedBox(
                     width: double.infinity,
-                    child: GradientButton(
-                      text: 'Set as Autofill Provider',
-                      icon: Icons.settings,
-                      gradient: const LinearGradient(
-                        colors: [AppTheme.accentCyan, AppTheme.accentPurple],
+                    child: OutlinedButton.icon(
+                      onPressed: _showAutofillDebugInfo,
+                      icon: const Icon(Icons.bug_report, size: 18),
+                      label: const Text('Autofill Diagnostics'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppTheme.textSecondary,
+                        side: const BorderSide(color: AppTheme.surfaceLight),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
                       ),
-                      onPressed: () async {
-                        await _autofillBridge.openAutofillSettings();
-                        // Wait and recheck multiple times
-                        for (var i = 0; i < 5; i++) {
-                          await Future.delayed(const Duration(seconds: 2));
-                          await _checkAutofillStatus();
-                          if (_isAutofillEnabled) break;
-                        }
-                      },
                     ),
                   ),
                 ],
-                if (_isAutofillEnabled) ...[
-                  SizedBox(
-                    width: double.infinity,
-                    child: GradientButton(
-                      text: 'Sync Passwords Now',
-                      icon: Icons.sync,
-                      gradient: const LinearGradient(
-                        colors: [AppTheme.accentGreen, AppTheme.accentCyan],
-                      ),
-                      onPressed: () async {
-                        await _autofillBridge.syncCredentials();
-                        if (mounted) {
-                          _showSnackBar('Passwords synced for autofill!');
-                        }
-                      },
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 12),
-                // Diagnostics button
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: _showAutofillDebugInfo,
-                    icon: const Icon(Icons.bug_report, size: 18),
-                    label: const Text('Autofill Diagnostics'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.textSecondary,
-                      side: const BorderSide(color: AppTheme.surfaceLight),
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
-          const SizedBox(height: 20),
+            const SizedBox(height: 20),
+          ],
 
           // Cloud Backup Section
           _buildSectionHeader('Cloud Backup', Icons.cloud_outlined),
@@ -367,24 +386,28 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                   // Auto backup toggle
                   _buildSettingToggle(
                     'Auto Backup',
-                    'Daily automatic backup to Google Drive',
+                    Platform.isWindows 
+                        ? 'Automatic sync when app is running'
+                        : 'Daily automatic backup to Google Drive',
                     Icons.cloud_sync_outlined,
                     backupConfig.autoBackupEnabled,
                     (value) async {
                       backupConfig.autoBackupEnabled = value;
                       await widget.vaultService.saveBackupConfig(backupConfig);
-                      if (value) {
-                        await startAutoBackupService();
-                        // Ask to disable battery optimization
-                        try {
-                          const platform = MethodChannel('com.oneshield.app/battery');
-                          final isIgnoring = await platform.invokeMethod<bool>('isIgnoringBatteryOptimizations');
-                          if (isIgnoring == false) {
-                            await platform.invokeMethod('requestIgnoreBatteryOptimizations');
-                          }
-                        } catch (_) {}
-                      } else {
-                        await stopAutoBackupService();
+                      if (!Platform.isWindows) {
+                        // Android: start/stop foreground service
+                        if (value) {
+                          await startAutoBackupService();
+                          try {
+                            const platform = MethodChannel('com.oneshield.app/battery');
+                            final isIgnoring = await platform.invokeMethod<bool>('isIgnoringBatteryOptimizations');
+                            if (isIgnoring == false) {
+                              await platform.invokeMethod('requestIgnoreBatteryOptimizations');
+                            }
+                          } catch (_) {}
+                        } else {
+                          await stopAutoBackupService();
+                        }
                       }
                       setState(() {});
                     },
@@ -518,6 +541,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
           const SizedBox(height: 40),
         ],
       ),
+      ),
     );
   }
 
@@ -616,52 +640,55 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     bool isDestructive = false,
     Widget? trailing,
   }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          children: [
-            Icon(
-              icon,
-              size: 20,
-              color: isDestructive
-                  ? AppTheme.accentRed
-                  : AppTheme.textSecondary,
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      color: isDestructive
-                          ? AppTheme.accentRed
-                          : AppTheme.textPrimary,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
+    return MouseRegion(
+      cursor: onTap != null ? SystemMouseCursors.click : SystemMouseCursors.basic,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            children: [
+              Icon(
+                icon,
+                size: 20,
+                color: isDestructive
+                    ? AppTheme.accentRed
+                    : AppTheme.textSecondary,
               ),
-            ),
-            trailing ??
-                Icon(
-                  Icons.chevron_right,
-                  color: AppTheme.textMuted.withValues(alpha: 0.5),
-                  size: 20,
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: isDestructive
+                            ? AppTheme.accentRed
+                            : AppTheme.textPrimary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
                 ),
-          ],
+              ),
+              trailing ??
+                  Icon(
+                    Icons.chevron_right,
+                    color: AppTheme.textMuted.withValues(alpha: 0.5),
+                    size: 20,
+                  ),
+            ],
+          ),
         ),
       ),
     );
@@ -1108,8 +1135,21 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   }
 
   void _showSnackBar(String message) {
+    ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+      SnackBar(
+        content: Text(message, style: const TextStyle(fontSize: 13)),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: Platform.isWindows
+            ? EdgeInsets.only(
+                bottom: 20,
+                left: MediaQuery.of(context).size.width * 0.6,
+                right: 20,
+              )
+            : const EdgeInsets.all(16),
+        duration: const Duration(seconds: 3),
+      ),
     );
   }
 

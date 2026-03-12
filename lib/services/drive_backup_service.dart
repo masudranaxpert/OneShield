@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import '../core/constants.dart';
 import 'vault_service.dart';
+import '../models/vault_entry.dart';
 
 /// Handles Google Drive backup/restore using OAuth2 directly.
 /// Uses the provided rclone client credentials for Google Drive API access.
@@ -257,47 +258,124 @@ class DriveBackupService {
     }
   }
 
-  /// Get or create backup folder in Google Drive
+  /// Get or create parent OneShield folder in Google Drive
+  /// Uses local cache to avoid creating duplicate folders
   Future<String?> _getOrCreateFolder() async {
     final config = vaultService.backupConfig;
-    final folderName = config.driveFolder ?? AppConstants.defaultDriveFolder;
 
+    // Step 1: Check cached backup folder ID
+    if (config.cachedBackupFolderId != null) {
+      if (await _verifyFolderExists(config.cachedBackupFolderId!)) {
+        return config.cachedBackupFolderId;
+      }
+      // Cache is stale, clear it
+      config.cachedBackupFolderId = null;
+      config.cachedParentFolderId = null;
+      await vaultService.saveBackupConfig(config);
+    }
+
+    // Step 2: Find or create parent folder
+    final parentId = await _findOrCreateFolder(AppConstants.driveParentFolder, null);
+    if (parentId == null) return null;
+    config.cachedParentFolderId = parentId;
+
+    // Step 3: Find or create backup subfolder
+    final backupId = await _findOrCreateFolder(AppConstants.defaultDriveFolder, parentId);
+    if (backupId != null) {
+      config.cachedBackupFolderId = backupId;
+      await vaultService.saveBackupConfig(config);
+    }
+    return backupId;
+  }
+
+  /// Get or create the Merge subfolder for sync
+  Future<String?> _getOrCreateMergeFolder() async {
+    final config = vaultService.backupConfig;
+
+    // Check cache first
+    if (config.cachedMergeFolderId != null) {
+      if (await _verifyFolderExists(config.cachedMergeFolderId!)) {
+        return config.cachedMergeFolderId;
+      }
+      config.cachedMergeFolderId = null;
+      await vaultService.saveBackupConfig(config);
+    }
+
+    // Get parent folder (may also be cached)
+    String? parentId = config.cachedParentFolderId;
+    if (parentId == null || !await _verifyFolderExists(parentId)) {
+      parentId = await _findOrCreateFolder(AppConstants.driveParentFolder, null);
+      if (parentId == null) return null;
+      config.cachedParentFolderId = parentId;
+    }
+
+    final mergeId = await _findOrCreateFolder(AppConstants.driveMergeFolder, parentId);
+    if (mergeId != null) {
+      config.cachedMergeFolderId = mergeId;
+      await vaultService.saveBackupConfig(config);
+    }
+    return mergeId;
+  }
+
+  /// Verify a folder ID still exists on Google Drive (not trashed)
+  Future<bool> _verifyFolderExists(String folderId) async {
+    final config = vaultService.backupConfig;
+    if (!await ensureValidToken()) return false;
+    try {
+      final resp = await http.get(
+        Uri.parse('$_driveApiUrl/$folderId?fields=id,trashed'),
+        headers: {'Authorization': 'Bearer ${config.accessToken}'},
+      );
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body);
+        return data['trashed'] != true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  /// Search Drive for a folder by name, create if not found.
+  /// Uses orderBy=createdTime to always pick the oldest folder for consistency.
+  Future<String?> _findOrCreateFolder(String folderName, String? parentId) async {
+    final config = vaultService.backupConfig;
     if (!await ensureValidToken()) return null;
 
-    // Search for existing folder
-    final searchResponse = await http.get(
-      Uri.parse(
-        '$_driveApiUrl?q=name%3D%27$folderName%27+and+mimeType%3D%27application/vnd.google-apps.folder%27+and+trashed%3Dfalse&fields=files(id,name)',
-      ),
+    // Build search query
+    String q = "name='$folderName' and mimeType='application/vnd.google-apps.folder' and trashed=false";
+    if (parentId != null) q += " and '$parentId' in parents";
+
+    final searchResp = await http.get(
+      Uri.parse('$_driveApiUrl?q=${Uri.encodeComponent(q)}&fields=files(id,name)&orderBy=createdTime'),
       headers: {'Authorization': 'Bearer ${config.accessToken}'},
     );
 
-    if (searchResponse.statusCode == 200) {
-      final data = jsonDecode(searchResponse.body);
-      final files = data['files'] as List;
+    if (searchResp.statusCode == 200) {
+      final files = jsonDecode(searchResp.body)['files'] as List;
       if (files.isNotEmpty) {
+        // Return the OLDEST folder to be consistent across devices
         return files[0]['id'];
       }
     }
 
-    // Create folder
-    final createResponse = await http.post(
+    // Not found -> create
+    final metadata = {
+      'name': folderName,
+      'mimeType': 'application/vnd.google-apps.folder',
+      if (parentId != null) 'parents': [parentId],
+    };
+
+    final createResp = await http.post(
       Uri.parse(_driveApiUrl),
       headers: {
         'Authorization': 'Bearer ${config.accessToken}',
         'Content-Type': 'application/json',
       },
-      body: jsonEncode({
-        'name': folderName,
-        'mimeType': 'application/vnd.google-apps.folder',
-      }),
+      body: jsonEncode(metadata),
     );
 
-    if (createResponse.statusCode == 200) {
-      final data = jsonDecode(createResponse.body);
-      return data['id'];
+    if (createResp.statusCode == 200) {
+      return jsonDecode(createResp.body)['id'];
     }
-
     return null;
   }
 
@@ -473,5 +551,96 @@ class DriveBackupService {
     config.storageUsed = null;
     config.storageLimit = null;
     await vaultService.saveBackupConfig(config);
+  }
+
+  /// Perform smart synchronization with cloud (Pull -> Merge -> Push)
+  /// Uses OneShield_Merge folder for cross-device sync
+  Future<bool> syncWithCloud() async {
+    try {
+      if (!await ensureValidToken()) return false;
+      
+      final mergeFolderId = await _getOrCreateMergeFolder();
+      if (mergeFolderId == null) return false;
+
+      final config = vaultService.backupConfig;
+      const mergeFileName = 'oneshield_sync.vpb';
+
+      // 1. Look for existing merge file in the Merge folder
+      final searchResponse = await http.get(
+        Uri.parse(
+          '$_driveApiUrl?q=${Uri.encodeComponent("name='$mergeFileName' and '$mergeFolderId' in parents and trashed=false")}&fields=files(id,name,modifiedTime)',
+        ),
+        headers: {'Authorization': 'Bearer ${config.accessToken}'},
+      );
+
+      String? existingMergeFileId;
+      if (searchResponse.statusCode == 200) {
+        final data = jsonDecode(searchResponse.body);
+        final files = data['files'] as List;
+        if (files.isNotEmpty) {
+          existingMergeFileId = files[0]['id'];
+        }
+      }
+
+      // 2. Download existing merge data if available
+      if (existingMergeFileId != null) {
+        final encryptedData = await downloadBackup(existingMergeFileId);
+        if (encryptedData != null && encryptedData.isNotEmpty) {
+          final syncData = vaultService.parseSyncData(encryptedData);
+          final remoteEntries = syncData['entries'] as List<VaultEntry>;
+          final remoteDeleted = syncData['deleted'] as List<String>;
+          
+          if (remoteEntries.isNotEmpty || remoteDeleted.isNotEmpty) {
+            // 3. Smart merge local vs remote (including deletions)
+            await vaultService.syncWithEntries(remoteEntries, remoteDeleted);
+          }
+        }
+      }
+
+      // 4. Upload merged data to Merge folder (single file, overwrite)
+      final exportData = vaultService.exportData();
+      if (existingMergeFileId != null) {
+        // Update existing file
+        await http.patch(
+          Uri.parse('$_driveUploadUrl/$existingMergeFileId?uploadType=media'),
+          headers: {
+            'Authorization': 'Bearer ${config.accessToken}',
+            'Content-Type': 'application/octet-stream',
+          },
+          body: utf8.encode(exportData),
+        );
+      } else {
+        // Create new merge file
+        final metaResponse = await http.post(
+          Uri.parse('$_driveApiUrl?fields=id'),
+          headers: {
+            'Authorization': 'Bearer ${config.accessToken}',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({
+            'name': mergeFileName,
+            'parents': [mergeFolderId],
+          }),
+        );
+        if (metaResponse.statusCode == 200) {
+          final fileId = jsonDecode(metaResponse.body)['id'];
+          await http.patch(
+            Uri.parse('$_driveUploadUrl/$fileId?uploadType=media'),
+            headers: {
+              'Authorization': 'Bearer ${config.accessToken}',
+              'Content-Type': 'application/octet-stream',
+            },
+            body: utf8.encode(exportData),
+          );
+        }
+      }
+
+      // 5. Also upload to Backups folder for safety
+      await uploadBackupSimple();
+      
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 }

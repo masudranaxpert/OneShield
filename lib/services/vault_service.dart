@@ -17,6 +17,7 @@ class VaultService {
   static const String _vaultBoxName = 'vault_entries';
   static const String _configBoxName = 'master_config';
   static const String _backupBoxName = 'backup_config';
+  static const String _deletedBoxName = 'deleted_entries'; // Track deleted IDs
   static const String _hiveEncryptionKeyName = 'oneshield_hive_encryption_key';
 
   /// Predefined security questions for password recovery
@@ -41,6 +42,31 @@ class VaultService {
   late Box<VaultEntry> _vaultBox;
   late Box<MasterConfig> _configBox;
   late Box<BackupConfig> _backupBox;
+  late Box<String> _deletedBox; 
+  
+  /// Callback for SyncService (legacy - kept for backward compatibility)
+  void Function()? onDataChanged;
+
+  /// Multiple listeners for UI refresh (HomeScreen, etc.)
+  final List<void Function()> _uiListeners = [];
+
+  /// Add a UI listener
+  void addListener(void Function() listener) {
+    _uiListeners.add(listener);
+  }
+
+  /// Remove a UI listener
+  void removeListener(void Function() listener) {
+    _uiListeners.remove(listener);
+  }
+
+  /// Notify all listeners (UI + SyncService)
+  void _notifyAll() {
+    onDataChanged?.call();
+    for (final listener in _uiListeners) {
+      listener();
+    }
+  }
 
   Uint8List? _currentKey;
   String? _currentIV;
@@ -104,6 +130,10 @@ class VaultService {
       );
       _backupBox = await Hive.openBox<BackupConfig>(
         _backupBoxName,
+        encryptionCipher: cipher,
+      );
+      _deletedBox = await Hive.openBox<String>(
+        _deletedBoxName,
         encryptionCipher: cipher,
       );
     } else {
@@ -406,6 +436,7 @@ class VaultService {
       tags: tags,
     );
     await _vaultBox.add(entry);
+    _notifyAll();
     return entry;
   }
 
@@ -414,6 +445,7 @@ class VaultService {
     entry.fields = _encryptFields(newFields);
     entry.updatedAt = DateTime.now();
     await entry.save();
+    _notifyAll();
   }
 
   /// Update entry metadata (title, category, etc.)
@@ -431,11 +463,16 @@ class VaultService {
     if (tags != null) entry.tags = tags;
     entry.updatedAt = DateTime.now();
     await entry.save();
+    _notifyAll();
   }
 
   /// Delete an entry
   Future<void> deleteEntry(VaultEntry entry) async {
+    final id = entry.id;
     await entry.delete();
+    // Track this deletion for sync
+    await _deletedBox.add(id);
+    _notifyAll();
   }
 
   /// Get all entries
@@ -491,13 +528,38 @@ class VaultService {
   String exportData() {
     final entries = _vaultBox.values.map((e) => e.toJson()).toList();
     final config = masterConfig?.toJson();
+    final deleted = _deletedBox.values.toList();
     final data = {
       'version': 1,
       'exportedAt': DateTime.now().toIso8601String(),
       'config': config,
       'entries': entries,
+      'deleted': deleted,
     };
     return jsonEncode(data);
+  }
+
+  /// Parse export data into a map containing both entries and deleted IDs
+  Map<String, dynamic> parseSyncData(String jsonString) {
+    try {
+      final data = jsonDecode(jsonString) as Map<String, dynamic>;
+      final entries = (data['entries'] as List? ?? [])
+          .map((e) => VaultEntry.fromJson(e as Map<String, dynamic>))
+          .toList();
+      final deleted = List<String>.from(data['deleted'] as List? ?? []);
+      return {
+        'entries': entries,
+        'deleted': deleted,
+      };
+    } catch (e) {
+      return {'entries': <VaultEntry>[], 'deleted': <String>[]};
+    }
+  }
+
+  /// Parse export data into a list of entries without importing
+  List<VaultEntry> parseExportData(String jsonString) {
+    final syncData = parseSyncData(jsonString);
+    return syncData['entries'] as List<VaultEntry>;
   }
 
   /// Import data from JSON
@@ -683,4 +745,63 @@ class VaultService {
 
   /// Get entry count
   int get entryCount => _vaultBox.length;
+
+  /// Sync local entries with an external list (Smart Merge)
+  Future<void> syncWithEntries(List<VaultEntry> externalEntries, [List<String>? externalDeleted]) async {
+    bool hasChanges = false;
+    
+    // 1. Process external deletions
+    if (externalDeleted != null) {
+      for (final id in externalDeleted) {
+        final localEntries = _vaultBox.values.where((e) => e.id == id).toList();
+        if (localEntries.isNotEmpty) {
+          for (var entry in localEntries) {
+            await entry.delete();
+            hasChanges = true;
+          }
+        }
+        // Also don't re-add if we just heard it was deleted elsewhere
+        if (!_deletedBox.values.contains(id)) {
+          await _deletedBox.add(id);
+        }
+      }
+    }
+
+    // 2. Process external additions/updates
+    for (final external in externalEntries) {
+      // If we deleted it locally, ignore remote version
+      if (_deletedBox.values.contains(external.id)) continue;
+
+      final local = _vaultBox.values.firstWhere(
+        (e) => e.id == external.id,
+        orElse: () => VaultEntry(
+          id: '', 
+          title: '', 
+          category: '', 
+          fields: {}, 
+          createdAt: DateTime.now(), 
+          updatedAt: DateTime.fromMillisecondsSinceEpoch(0)
+        ),
+      );
+
+      if (local.id.isEmpty) {
+        await _vaultBox.add(external);
+        hasChanges = true;
+      } else if (external.updatedAt.isAfter(local.updatedAt)) {
+        local.title = external.title;
+        local.category = external.category;
+        local.fields = external.fields;
+        local.iconName = external.iconName;
+        local.updatedAt = external.updatedAt;
+        local.isFavorite = external.isFavorite;
+        local.tags = external.tags;
+        await local.save();
+        hasChanges = true;
+      }
+    }
+    
+    if (hasChanges) {
+      _notifyAll();
+    }
+  }
 }

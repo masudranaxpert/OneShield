@@ -61,6 +61,8 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<void> _tryBiometric() async {
+    // Skip biometrics on Windows
+    if (Platform.isWindows) return;
     if (widget.vaultService.masterConfig?.biometricEnabled != true) return;
 
     try {
@@ -91,14 +93,9 @@ class _LoginScreenState extends State<LoginScreen>
         } else {
           debugPrint('OneShield: Vault unlock with biometric key failed');
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                  'Authentication key not found. Please disable and re-enable '
-                  'Device Authentication in Settings.',
-                ),
-                duration: Duration(seconds: 4),
-              ),
+            _showSnackBar(
+              'Authentication key not found. Please disable and re-enable '
+              'Device Authentication in Settings.',
             );
           }
         }
@@ -164,68 +161,41 @@ class _LoginScreenState extends State<LoginScreen>
 
       if (!mounted) return;
 
-      // Show password dialog for import
-      final passController = TextEditingController();
-      final password = await showDialog<String>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Import Backup'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Enter the master password for this backup file.',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: passController,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  hintText: 'Master password',
-                  prefixIcon: Icon(Icons.lock_outline),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, passController.text),
-              child: const Text('Import'),
-            ),
-          ],
-        ),
-      );
-
-      if (password == null || password.isEmpty) return;
-
       setState(() => _isLoading = true);
 
-      final success = await widget.vaultService.importFullBackup(content, password);
+      // Import without password - user will login with the backup's master password
+      final success = await widget.vaultService.importFullBackupWithoutPassword(content);
 
       setState(() => _isLoading = false);
 
       if (success && mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => HomeScreen(vaultService: widget.vaultService),
-          ),
-        );
+        _showSnackBar('Backup imported! Please login with your master password.');
+        // Stay on login screen - user must enter backup's master password to unlock
       } else {
-        _showSnackBar('Import failed. Check password and file format.');
+        _showSnackBar('Import failed. Check the file format.');
       }
     } catch (e) {
+      setState(() => _isLoading = false);
       _showSnackBar('Error reading backup file');
     }
   }
 
   void _showSnackBar(String message) {
+    ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+      SnackBar(
+        content: Text(message, style: const TextStyle(fontSize: 13)),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: Platform.isWindows
+            ? EdgeInsets.only(
+                bottom: 20,
+                left: MediaQuery.of(context).size.width * 0.6,
+                right: 20,
+              )
+            : const EdgeInsets.all(16),
+        duration: const Duration(seconds: 3),
+      ),
     );
   }
 
@@ -258,7 +228,9 @@ class _LoginScreenState extends State<LoginScreen>
             opacity: _fadeAnimation,
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(24),
-              child: _showRecovery ? _buildRecoveryView() : _buildLoginView(),
+              child: DesktopResponsiveWrapper(
+                child: _showRecovery ? _buildRecoveryView() : _buildLoginView(),
+              ),
             ),
           ),
         ),
@@ -317,6 +289,8 @@ class _LoginScreenState extends State<LoginScreen>
           prefixIcon: Icons.lock_outline,
           onToggleVisibility: () =>
               setState(() => _obscure = !_obscure),
+          onSubmitted: (_) => _unlock(),
+          textInputAction: TextInputAction.go,
         ),
         const SizedBox(height: 32),
         GradientButton(
@@ -350,7 +324,7 @@ class _LoginScreenState extends State<LoginScreen>
             ),
           ),
         ),
-        if (widget.vaultService.masterConfig?.biometricEnabled == true) ...[
+        if (!Platform.isWindows && widget.vaultService.masterConfig?.biometricEnabled == true) ...[
           const SizedBox(height: 24),
           IconButton(
             onPressed: _tryBiometric,

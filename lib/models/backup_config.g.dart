@@ -26,13 +26,17 @@ class BackupConfigAdapter extends TypeAdapter<BackupConfig> {
       storageUsed: fields[11] as int?,
       storageLimit: fields[12] as int?,
       localBackupPath: fields[13] as String?,
+      cachedParentFolderId: fields[14] as String?,
+      cachedBackupFolderId: fields[15] as String?,
+      cachedMergeFolderId: fields[16] as String?,
+      lockOnMinimize: fields[17] as bool? ?? true,
     );
   }
 
   @override
   void write(BinaryWriter writer, BackupConfig obj) {
     writer
-      ..writeByte(14)
+      ..writeByte(18)
       ..writeByte(0)
       ..write(obj.refreshToken)
       ..writeByte(1)
@@ -60,7 +64,15 @@ class BackupConfigAdapter extends TypeAdapter<BackupConfig> {
       ..writeByte(12)
       ..write(obj.storageLimit)
       ..writeByte(13)
-      ..write(obj.localBackupPath);
+      ..write(obj.localBackupPath)
+      ..writeByte(14)
+      ..write(obj.cachedParentFolderId)
+      ..writeByte(15)
+      ..write(obj.cachedBackupFolderId)
+      ..writeByte(16)
+      ..write(obj.cachedMergeFolderId)
+      ..writeByte(17)
+      ..write(obj.lockOnMinimize);
   }
 
   @override

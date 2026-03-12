@@ -10,6 +10,8 @@ import 'services/drive_backup_service.dart';
 import 'services/autofill_bridge.dart';
 import 'screens/login_screen.dart';
 import 'screens/setup_screen.dart';
+import 'services/desktop_service.dart';
+import 'services/sync_service.dart';
 
 // ─────────────────────────────────────────────────
 // Auto Backup Logic
@@ -168,6 +170,13 @@ Future<void> stopAutoBackupService() async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // SINGLE INSTANCE CHECK (Windows Only)
+  if (Platform.isWindows) {
+    if (!await DesktopService.ensureSingleInstance()) {
+      exit(0); // Exit if another one is already running
+    }
+  }
+
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -177,17 +186,32 @@ void main() async {
     ),
   );
 
-  // Initialize foreground task
-  FlutterForegroundTask.initCommunicationPort();
-  _initForegroundTask();
-
+  // Initialize heavy services in parallel to speed up startup
   final vaultService = VaultService();
-  await vaultService.init();
+  
+  final initFutures = <Future>[
+    vaultService.init(),
+  ];
 
-  // Start foreground service if auto backup is enabled
-  if (vaultService.backupConfig.autoBackupEnabled &&
+  if (Platform.isWindows) {
+    initFutures.add(DesktopService.init());
+  } else if (Platform.isAndroid) {
+    FlutterForegroundTask.initCommunicationPort();
+    _initForegroundTask();
+  }
+
+  await Future.wait(initFutures);
+
+  // Background initializations (don't block UI)
+  if (Platform.isAndroid &&
+      vaultService.backupConfig.autoBackupEnabled &&
       vaultService.backupConfig.isLoggedIn) {
-    await startAutoBackupService();
+    startAutoBackupService(); // No await needed here
+  }
+
+  // Initialize Sync Service
+  if (vaultService.backupConfig.isLoggedIn) {
+    SyncService(vaultService: vaultService).initialSync(); // No await needed
   }
 
   runApp(OneShieldApp(vaultService: vaultService));
@@ -220,6 +244,25 @@ class _OneShieldAppState extends State<OneShieldApp>
     );
     // Check shortly after app start
     Future.delayed(const Duration(seconds: 5), _checkAutoBackup);
+
+    // On Windows: lock vault immediately when hidden to tray
+    if (Platform.isWindows) {
+      DesktopService.onWindowHidden = _lockAndShowLogin;
+    }
+  }
+
+  /// Lock vault and navigate to login screen (if setting enabled)
+  void _lockAndShowLogin() {
+    if (!widget.vaultService.isUnlocked) return;
+    if (!widget.vaultService.backupConfig.lockOnMinimize) return; // Setting is OFF
+    
+    widget.vaultService.lock();
+    _navigatorKey.currentState?.pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (_) => LoginScreen(vaultService: widget.vaultService),
+      ),
+      (_) => false,
+    );
   }
 
   @override
@@ -260,6 +303,7 @@ class _OneShieldAppState extends State<OneShieldApp>
         ScaffoldMessenger.of(ctx).showSnackBar(
           SnackBar(
             content: const Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(Icons.cloud_done, color: Colors.white, size: 18),
                 SizedBox(width: 8),
@@ -272,6 +316,13 @@ class _OneShieldAppState extends State<OneShieldApp>
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(10),
             ),
+            margin: Platform.isWindows
+                ? EdgeInsets.only(
+                    bottom: 20,
+                    left: MediaQuery.of(ctx).size.width * 0.6,
+                    right: 20,
+                  )
+                : const EdgeInsets.all(16),
           ),
         );
       }

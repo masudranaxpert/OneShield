@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/constants.dart';
@@ -6,10 +7,12 @@ import '../models/vault_entry.dart';
 import '../services/vault_service.dart';
 import '../services/crypto_service.dart';
 import '../services/autofill_bridge.dart';
+import '../services/drive_backup_service.dart';
 import '../widgets/common_widgets.dart';
 import 'add_entry_screen.dart';
 import 'entry_detail_screen.dart';
 import 'settings_screen.dart';
+import 'login_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final VaultService vaultService;
@@ -28,6 +31,11 @@ class _HomeScreenState extends State<HomeScreen>
   final _searchController = TextEditingController();
   bool _showSearch = false;
 
+  // Nested navigator for Windows so sidebar stays persistent
+  final GlobalKey<NavigatorState> _contentNavigatorKey = GlobalKey<NavigatorState>();
+
+  bool _isSyncing = false;
+
   late AnimationController _fabAnimController;
   late AutofillBridge _autofillBridge;
 
@@ -40,12 +48,21 @@ class _HomeScreenState extends State<HomeScreen>
     );
     _fabAnimController.forward();
     _autofillBridge = AutofillBridge(vaultService: widget.vaultService);
-    // Sync credentials for autofill when vault is unlocked
     _autofillBridge.syncCredentials();
+    
+    // Listen for background sync changes to refresh UI in real-time
+    widget.vaultService.addListener(_onVaultDataChanged);
+  }
+
+  void _onVaultDataChanged() {
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   @override
   void dispose() {
+    widget.vaultService.removeListener(_onVaultDataChanged);
     _searchController.dispose();
     _fabAnimController.dispose();
     super.dispose();
@@ -77,12 +94,17 @@ class _HomeScreenState extends State<HomeScreen>
 
   @override
   Widget build(BuildContext context) {
+    if (Platform.isWindows) {
+      return _buildWindowsLayout();
+    }
+    return _buildMobileLayout();
+  }
+
+  Widget _buildMobileLayout() {
     return PopScope(
-      // Allow pop (exit) only when on vault tab
       canPop: _selectedIndex == 0,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
-        // If on a non-vault tab, go back to vault tab first
         if (_selectedIndex != 0) {
           setState(() => _selectedIndex = 0);
         }
@@ -112,10 +134,55 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  Widget _buildWindowsLayout() {
+    return Scaffold(
+      body: SafeArea(
+        child: Row(
+          children: [
+            _buildSidebar(),
+            Expanded(
+              child: Navigator(
+                key: _contentNavigatorKey,
+                onGenerateRoute: (settings) {
+                  return MaterialPageRoute(
+                    builder: (_) => _buildWindowsContent(),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+      floatingActionButton: _selectedIndex == 0
+          ? ScaleTransition(
+              scale: _fabAnimController,
+              child: FloatingActionButton(
+                onPressed: _addNewEntry,
+                mouseCursor: SystemMouseCursors.click,
+                child: const Icon(Icons.add),
+              ),
+            )
+          : null,
+    );
+  }
+
+  Widget _buildWindowsContent() {
+    return IndexedStack(
+      index: _selectedIndex,
+      children: [
+        _buildVaultTab(),
+        _buildGeneratorTab(),
+        SettingsScreen(vaultService: widget.vaultService),
+      ],
+    );
+  }
+
   Widget _buildVaultTab() {
     final entries = _getFilteredEntries();
 
-    return CustomScrollView(
+    return DesktopResponsiveWrapper(
+      maxWidth: 800,
+      child: CustomScrollView(
       slivers: [
         // App bar
         SliverToBoxAdapter(
@@ -193,6 +260,26 @@ class _HomeScreenState extends State<HomeScreen>
                     icon: const Icon(Icons.search,
                         color: AppTheme.textSecondary),
                   ),
+                // Sync button
+                if (!_showSearch && widget.vaultService.backupConfig.isLoggedIn)
+                  _isSyncing
+                      ? const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppTheme.accentCyan,
+                            ),
+                          ),
+                        )
+                      : IconButton(
+                          onPressed: _performSync,
+                          icon: const Icon(Icons.sync,
+                              color: AppTheme.accentCyan),
+                          tooltip: 'Sync with cloud',
+                        ),
               ],
             ),
           ),
@@ -247,6 +334,7 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ),
       ],
+    ),
     );
   }
 
@@ -415,6 +503,155 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  Widget _buildSidebar() {
+    return Container(
+      width: 200,
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceDark,
+        border: Border(
+          right: BorderSide(
+            color: AppTheme.surfaceLight.withValues(alpha: 0.3),
+            width: 1,
+          ),
+        ),
+      ),
+      child: Column(
+        children: [
+          const SizedBox(height: 32),
+          // App Logo & Title
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.asset(
+                    AppConstants.logoAsset,
+                    width: 32,
+                    height: 32,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                const Text(
+                  'OneShield',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 40),
+          _buildSidebarItem(0, Icons.shield_outlined, Icons.shield, 'Vault'),
+          _buildSidebarItem(
+              1, Icons.casino_outlined, Icons.casino, 'Generator'),
+          _buildSidebarItem(
+              2, Icons.settings_outlined, Icons.settings, 'Settings'),
+          const Spacer(),
+          // Logout at bottom
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: InkWell(
+              onTap: _logout,
+              mouseCursor: SystemMouseCursors.click,
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.accentRed.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: AppTheme.accentRed.withValues(alpha: 0.2),
+                  ),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.logout, size: 20, color: AppTheme.accentRed),
+                    SizedBox(width: 12),
+                    Text(
+                      'Logout',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.accentRed,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _logout() {
+    widget.vaultService.lock();
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => LoginScreen(vaultService: widget.vaultService)),
+      (route) => false,
+    );
+  }
+
+  Widget _buildSidebarItem(
+      int index, IconData icon, IconData activeIcon, String label) {
+    final isSelected = _selectedIndex == index;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: InkWell(
+          onTap: () => setState(() => _selectedIndex = index),
+          borderRadius: BorderRadius.circular(12),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? AppTheme.accentCyan.withValues(alpha: 0.12)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  isSelected ? activeIcon : icon,
+                  color: isSelected ? AppTheme.accentCyan : AppTheme.textMuted,
+                  size: 22,
+                ),
+                const SizedBox(width: 16),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                    color: isSelected ? AppTheme.accentCyan : AppTheme.textMuted,
+                  ),
+                ),
+                if (isSelected) ...[
+                  const Spacer(),
+                  Container(
+                    width: 5,
+                    height: 5,
+                    decoration: const BoxDecoration(
+                      color: AppTheme.accentCyan,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildNavItem(
       int index, IconData icon, IconData activeIcon, String label) {
     final isSelected = _selectedIndex == index;
@@ -484,7 +721,10 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _addNewEntry() async {
-    final result = await Navigator.of(context).push<bool>(
+    final nav = Platform.isWindows
+        ? _contentNavigatorKey.currentState!
+        : Navigator.of(context);
+    final result = await nav.push<bool>(
       MaterialPageRoute(
         builder: (_) => AddEntryScreen(vaultService: widget.vaultService),
       ),
@@ -497,7 +737,10 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _openEntry(VaultEntry entry) async {
-    await Navigator.of(context).push(
+    final nav = Platform.isWindows
+        ? _contentNavigatorKey.currentState!
+        : Navigator.of(context);
+    await nav.push(
       MaterialPageRoute(
         builder: (_) => EntryDetailScreen(
           vaultService: widget.vaultService,
@@ -508,6 +751,64 @@ class _HomeScreenState extends State<HomeScreen>
     setState(() {});
     // Re-sync after possible edit or delete
     _autofillBridge.syncCredentials();
+  }
+
+  Future<void> _performSync() async {
+    if (_isSyncing) return;
+    setState(() => _isSyncing = true);
+    try {
+      final driveService = DriveBackupService(vaultService: widget.vaultService);
+      await driveService.syncWithCloud();
+      if (mounted) {
+        setState(() {});
+        _showSyncNotification(context, 'Synced with cloud successfully!', isSuccess: true);
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSyncNotification(context, 'Sync failed: $e', isSuccess: false);
+      }
+    } finally {
+      if (mounted) setState(() => _isSyncing = false);
+    }
+  }
+
+  /// Show a styled notification that works well on both mobile and Windows
+  void _showSyncNotification(BuildContext context, String message, {required bool isSuccess}) {
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isSuccess ? Icons.check_circle_outline : Icons.error_outline,
+              color: Colors.white,
+              size: 20,
+            ),
+            const SizedBox(width: 10),
+            Flexible(
+              child: Text(
+                message,
+                style: const TextStyle(fontSize: 13),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: isSuccess
+            ? const Color(0xFF00C853)
+            : const Color(0xFFFF5252),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: Platform.isWindows
+            ? EdgeInsets.only(
+                bottom: 20,
+                left: MediaQuery.of(context).size.width * 0.6,
+                right: 20,
+              )
+            : const EdgeInsets.all(16),
+        duration: const Duration(seconds: 3),
+      ),
+    );
   }
 }
 
@@ -545,10 +846,28 @@ class _PasswordGeneratorViewState extends State<_PasswordGeneratorView> {
 
   void _copyToClipboard() {
     Clipboard.setData(ClipboardData(text: _generatedPassword));
+    ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Password copied (auto-clear in 30s)'),
-        duration: Duration(seconds: 2),
+      SnackBar(
+        content: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.check_circle_outline, color: Colors.white, size: 18),
+            SizedBox(width: 8),
+            Text('Password copied (auto-clear in 30s)', style: TextStyle(fontSize: 13)),
+          ],
+        ),
+        backgroundColor: const Color(0xFF00C853),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: Platform.isWindows
+            ? EdgeInsets.only(
+                bottom: 20,
+                left: MediaQuery.of(context).size.width * 0.6,
+                right: 20,
+              )
+            : const EdgeInsets.all(16),
+        duration: const Duration(seconds: 2),
       ),
     );
     // Auto-clear clipboard after 30 seconds
@@ -561,7 +880,9 @@ class _PasswordGeneratorViewState extends State<_PasswordGeneratorView> {
   Widget build(BuildContext context) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
-      child: Column(
+      child: DesktopResponsiveWrapper(
+        maxWidth: 600,
+        child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 16),
@@ -713,6 +1034,7 @@ class _PasswordGeneratorViewState extends State<_PasswordGeneratorView> {
             ),
           ),
         ],
+      ),
       ),
     );
   }

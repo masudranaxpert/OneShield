@@ -44,6 +44,20 @@ class BackupConfig extends HiveObject {
   @HiveField(13)
   String? localBackupPath;
 
+  // Cached Google Drive folder IDs to prevent duplicate folder creation
+  @HiveField(14)
+  String? cachedParentFolderId;
+
+  @HiveField(15)
+  String? cachedBackupFolderId;
+
+  @HiveField(16)
+  String? cachedMergeFolderId;
+
+  // Windows: lock vault when minimized to tray
+  @HiveField(17)
+  bool lockOnMinimize;
+
   BackupConfig({
     this.refreshToken,
     this.accessToken,
@@ -59,6 +73,10 @@ class BackupConfig extends HiveObject {
     this.storageUsed,
     this.storageLimit,
     this.localBackupPath,
+    this.cachedParentFolderId,
+    this.cachedBackupFolderId,
+    this.cachedMergeFolderId,
+    this.lockOnMinimize = true, // Default: locked for security
   });
 
   bool get isLoggedIn => refreshToken != null && refreshToken!.isNotEmpty;
@@ -104,6 +122,10 @@ class BackupConfig extends HiveObject {
         'storageUsed': storageUsed,
         'storageLimit': storageLimit,
         'localBackupPath': localBackupPath,
+        'cachedParentFolderId': cachedParentFolderId,
+        'cachedBackupFolderId': cachedBackupFolderId,
+        'cachedMergeFolderId': cachedMergeFolderId,
+        'lockOnMinimize': lockOnMinimize,
       };
 
   factory BackupConfig.fromJson(Map<String, dynamic> json) => BackupConfig(
@@ -126,5 +148,9 @@ class BackupConfig extends HiveObject {
         storageUsed: json['storageUsed'],
         storageLimit: json['storageLimit'],
         localBackupPath: json['localBackupPath'],
+        cachedParentFolderId: json['cachedParentFolderId'],
+        cachedBackupFolderId: json['cachedBackupFolderId'],
+        cachedMergeFolderId: json['cachedMergeFolderId'],
+        lockOnMinimize: json['lockOnMinimize'] ?? true,
       );
 }

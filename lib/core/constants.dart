@@ -13,8 +13,11 @@ class AppConstants {
   static const String logoAsset = 'assets/logo/OneShield_logo.png';
 
   // ── Backup Defaults ───────────────────────────────────
+  static const String driveParentFolder = 'OneShield';
   static const String defaultDriveFolder = 'OneShield_Backups';
+  static const String driveMergeFolder = 'OneShield_Merge';
   static const String backupFilePrefix = 'oneshield_backup';
+  static const String mergeFilePrefix = 'oneshield_merge';
   static const String backupFileExtension = '.vpb';
   static const String defaultBackupTime = '02:00';
 

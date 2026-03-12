@@ -1,6 +1,29 @@
 import 'package:flutter/material.dart';
 import '../core/theme.dart';
 
+
+/// Mobile: full width | Desktop: centered, max 480px
+class DesktopResponsiveWrapper extends StatelessWidget {
+  final Widget child;
+  final double maxWidth;
+
+  const DesktopResponsiveWrapper({
+    super.key,
+    required this.child,
+    this.maxWidth = 480,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: child,
+      ),
+    );
+  }
+}
+
 /// Gradient button with glow effect
 class GradientButton extends StatefulWidget {
   final String text;
@@ -55,14 +78,16 @@ class _GradientButtonState extends State<GradientButton>
         scale: _scaleAnimation.value,
         child: child,
       ),
-      child: GestureDetector(
-        onTapDown: (_) => _controller.forward(),
-        onTapUp: (_) {
-          _controller.reverse();
-          if (!widget.isLoading) widget.onPressed();
-        },
-        onTapCancel: () => _controller.reverse(),
-        child: Container(
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTapDown: (_) => _controller.forward(),
+          onTapUp: (_) {
+            _controller.reverse();
+            if (!widget.isLoading) widget.onPressed();
+          },
+          onTapCancel: () => _controller.reverse(),
+          child: Container(
           width: widget.width ?? double.infinity,
           padding: const EdgeInsets.symmetric(vertical: 16),
           decoration: BoxDecoration(
@@ -101,6 +126,7 @@ class _GradientButtonState extends State<GradientButton>
           ),
         ),
       ),
+      ),
     );
   }
 }
@@ -124,7 +150,7 @@ class GlassCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    final card = GestureDetector(
       onTap: onTap,
       child: Container(
         margin: margin ?? const EdgeInsets.only(bottom: 12),
@@ -140,6 +166,13 @@ class GlassCard extends StatelessWidget {
         child: child,
       ),
     );
+    if (onTap != null) {
+      return MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: card,
+      );
+    }
+    return card;
   }
 }
 
@@ -156,6 +189,8 @@ class VaultTextField extends StatelessWidget {
   final int maxLines;
   final TextInputType? keyboardType;
   final String? Function(String?)? validator;
+  final ValueChanged<String>? onSubmitted;
+  final TextInputAction? textInputAction;
 
   const VaultTextField({
     super.key,
@@ -170,6 +205,8 @@ class VaultTextField extends StatelessWidget {
     this.maxLines = 1,
     this.keyboardType,
     this.validator,
+    this.onSubmitted,
+    this.textInputAction,
   });
 
   @override
@@ -193,6 +230,8 @@ class VaultTextField extends StatelessWidget {
           maxLines: obscureText ? 1 : maxLines,
           keyboardType: keyboardType,
           validator: validator,
+          onFieldSubmitted: onSubmitted,
+          textInputAction: textInputAction ?? TextInputAction.done,
           style: const TextStyle(
             color: AppTheme.textPrimary,
             fontSize: 15,
@@ -240,33 +279,36 @@ class CategoryChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(
-          color: selected ? color.withValues(alpha: 0.2) : AppTheme.surfaceMid,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: selected ? color : AppTheme.surfaceLight,
-            width: selected ? 1.5 : 1,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: selected ? color : AppTheme.textMuted, size: 18),
-            const SizedBox(width: 8),
-            Text(
-              label,
-              style: TextStyle(
-                color: selected ? color : AppTheme.textSecondary,
-                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                fontSize: 13,
-              ),
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: selected ? color.withValues(alpha: 0.2) : AppTheme.surfaceMid,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected ? color : AppTheme.surfaceLight,
+              width: selected ? 1.5 : 1,
             ),
-          ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: selected ? color : AppTheme.textMuted, size: 18),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  color: selected ? color : AppTheme.textSecondary,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

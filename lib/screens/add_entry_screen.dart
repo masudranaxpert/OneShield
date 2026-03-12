@@ -169,7 +169,9 @@ class _AddEntryScreenState extends State<AddEntryScreen> {
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
-        child: Column(
+        child: DesktopResponsiveWrapper(
+          maxWidth: 600,
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Category selector
@@ -272,6 +274,7 @@ class _AddEntryScreenState extends State<AddEntryScreen> {
               isLoading: _isLoading,
             ),
           ],
+        ),
         ),
       ),
     );
