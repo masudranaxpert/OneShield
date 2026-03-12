@@ -1228,7 +1228,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: AppTheme.accentCyan.withValues(alpha: 0.2)),
                 ),
-                child: const Column(
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
