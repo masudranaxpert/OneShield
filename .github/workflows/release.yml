@@ -1,0 +1,125 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  # ─────────────────────────────────────────
+  # Build Android APK
+  # ─────────────────────────────────────────
+  build-apk:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.27.4'
+          channel: 'stable'
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build APK
+        run: flutter build apk --release
+
+      - name: Rename APK
+        run: mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/OneShield-${{ github.ref_name }}.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: build/app/outputs/flutter-apk/OneShield-${{ github.ref_name }}.apk
+
+  # ─────────────────────────────────────────
+  # Build Windows EXE
+  # ─────────────────────────────────────────
+  build-windows:
+    name: Build Windows EXE
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.27.4'
+          channel: 'stable'
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build Windows
+        run: flutter build windows --release
+
+      - name: Create ZIP
+        run: Compress-Archive -Path "build\windows\x64\runner\Release\*" -DestinationPath "OneShield-Windows-${{ github.ref_name }}.zip"
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: OneShield-Windows-${{ github.ref_name }}.zip
+
+  # ─────────────────────────────────────────
+  # Create GitHub Release
+  # ─────────────────────────────────────────
+  release:
+    name: Create Release
+    needs: [build-apk, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download APK
+        uses: actions/download-artifact@v4
+        with:
+          name: android-apk
+          path: ./release-assets
+
+      - name: Download Windows EXE
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-exe
+          path: ./release-assets
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: OneShield ${{ github.ref_name }}
+          body: |
+            ## 🛡️ OneShield ${{ github.ref_name }}
+
+            ### Downloads
+            - **📱 Android**: `OneShield-${{ github.ref_name }}.apk`
+            - **🖥️ Windows**: `OneShield-Windows-${{ github.ref_name }}.zip` (Extract & run `one_shield.exe`)
+
+            ### What's New
+            - Real-time Google Drive sync across devices
+            - Deletion tracking (delete on one device, syncs to all)
+            - Background polling every 30 seconds
+            - Windows: Lock on Minimize toggle in Settings
+            - Windows: Custom app icon, floating notifications
+            - Faster sync (2s upload debounce)
+          files: |
+            ./release-assets/*
+          draft: false
+          prerelease: false
