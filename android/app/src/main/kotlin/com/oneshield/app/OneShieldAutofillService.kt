@@ -84,8 +84,14 @@ class OneShieldAutofillService : AutofillService() {
             // Match credentials by URL/domain
             val matching = if (webDomain != null || appPackage != null) {
                 credentials.filter { cred ->
-                    val url = cred.optString("url", "").lowercase()
+                    val url = cred.optString("url", "").lowercase().trim()
+                    
+                    // Skip credentials without a URL - they should NOT match any site
+                    if (url.isEmpty()) return@filter false
+                    
                     val credDomain = extractDomain(url)
+                    if (credDomain.isEmpty()) return@filter false
+                    
                     val matched = if (webDomain != null) {
                         val wd = webDomain.lowercase()
                         url.contains(wd) ||
