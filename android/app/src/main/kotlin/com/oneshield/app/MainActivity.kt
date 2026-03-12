@@ -1,7 +1,9 @@
 package com.oneshield.app
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import android.view.autofill.AutofillManager
@@ -14,10 +16,39 @@ import androidx.security.crypto.MasterKey
 class MainActivity : FlutterFragmentActivity() {
 
     private val CHANNEL = "com.oneshield.app/autofill"
+    private val BATTERY_CHANNEL = "com.oneshield.app/battery"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        // Battery optimization channel
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, BATTERY_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "isIgnoringBatteryOptimizations" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        val pm = getSystemService(PowerManager::class.java)
+                        result.success(pm?.isIgnoringBatteryOptimizations(packageName) == true)
+                    } else {
+                        result.success(true)
+                    }
+                }
+                "requestIgnoreBatteryOptimizations" -> {
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                            intent.data = Uri.parse("package:$packageName")
+                            startActivity(intent)
+                        }
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("BATTERY_ERROR", e.message, null)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        // Autofill channel
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "syncCredentials" -> {

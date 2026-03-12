@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'core/constants.dart';
 import 'core/theme.dart';
 import 'services/vault_service.dart';
@@ -9,10 +11,163 @@ import 'services/autofill_bridge.dart';
 import 'screens/login_screen.dart';
 import 'screens/setup_screen.dart';
 
+// ─────────────────────────────────────────────────
+// Auto Backup Logic
+// ─────────────────────────────────────────────────
+
+class AutoBackupHelper {
+  static bool _isRunning = false;
+
+  /// Check if backup is needed (once per day) and run it.
+  static Future<bool> runIfNeeded(VaultService vaultService) async {
+    if (_isRunning) return false;
+
+    final config = vaultService.backupConfig;
+    if (!config.autoBackupEnabled) return false;
+    if (!config.isLoggedIn) return false;
+
+    final now = DateTime.now();
+    final todayStart = DateTime(now.year, now.month, now.day);
+
+    // Already backed up today — skip
+    if (config.lastBackup != null &&
+        config.lastBackup!.isAfter(todayStart)) {
+      return false;
+    }
+
+    _isRunning = true;
+    try {
+      final driveService = DriveBackupService(vaultService: vaultService);
+      return await driveService.uploadBackupSimple();
+    } catch (_) {
+      return false;
+    } finally {
+      _isRunning = false;
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────
+// Foreground Task Handler (runs even when app is closed)
+// ─────────────────────────────────────────────────
+
+@pragma('vm:entry-point')
+void startCallback() {
+  FlutterForegroundTask.setTaskHandler(AutoBackupTaskHandler());
+}
+
+class AutoBackupTaskHandler extends TaskHandler {
+  @override
+  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    // Foreground task started
+  }
+
+  @override
+  void onRepeatEvent(DateTime timestamp) async {
+    // Called every 15 minutes — check if daily backup is needed
+    try {
+      final vaultService = VaultService();
+      await vaultService.init();
+      final success = await AutoBackupHelper.runIfNeeded(vaultService);
+      if (success) {
+        FlutterForegroundTask.updateService(
+          notificationTitle: 'OneShield',
+          notificationText: 'Auto backup completed ✓',
+        );
+        await Future.delayed(const Duration(seconds: 30));
+        FlutterForegroundTask.updateService(
+          notificationTitle: 'OneShield',
+          notificationText: 'Auto backup active',
+        );
+      }
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
+    // Foreground task destroyed
+  }
+
+  @override
+  void onReceiveData(Object data) {}
+
+  @override
+  void onNotificationButtonPressed(String id) {}
+
+  @override
+  void onNotificationPressed() {
+    FlutterForegroundTask.launchApp();
+  }
+
+  @override
+  void onNotificationDismissed() {}
+}
+
+// ─────────────────────────────────────────────────
+// Foreground Task Init & Control
+// ─────────────────────────────────────────────────
+
+void _initForegroundTask() {
+  FlutterForegroundTask.init(
+    androidNotificationOptions: AndroidNotificationOptions(
+      channelId: 'oneshield_auto_backup',
+      channelName: 'Auto Backup Service',
+      channelDescription: 'Keeps auto backup running for daily protection',
+      onlyAlertOnce: true,
+    ),
+    iosNotificationOptions: const IOSNotificationOptions(
+      showNotification: false,
+      playSound: false,
+    ),
+    foregroundTaskOptions: ForegroundTaskOptions(
+      // Check every 12 hours (43200000 ms)
+      eventAction: ForegroundTaskEventAction.repeat(43200000),
+      autoRunOnBoot: true,
+      autoRunOnMyPackageReplaced: true,
+      allowWakeLock: true,
+      allowWifiLock: true,
+    ),
+  );
+}
+
+/// Request permissions for foreground task
+Future<void> _requestPermissions() async {
+  final notifPerm = await FlutterForegroundTask.checkNotificationPermission();
+  if (notifPerm != NotificationPermission.granted) {
+    await FlutterForegroundTask.requestNotificationPermission();
+  }
+
+  if (Platform.isAndroid) {
+    if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
+      await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+    }
+  }
+}
+
+/// Start the foreground backup service
+Future<void> startAutoBackupService() async {
+  await _requestPermissions();
+  if (await FlutterForegroundTask.isRunningService) return;
+
+  await FlutterForegroundTask.startService(
+    notificationTitle: 'OneShield',
+    notificationText: 'Auto backup active',
+    callback: startCallback,
+  );
+}
+
+/// Stop the foreground backup service
+Future<void> stopAutoBackupService() async {
+  await FlutterForegroundTask.stopService();
+}
+
+// ─────────────────────────────────────────────────
+// Main App
+// ─────────────────────────────────────────────────
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Set system UI style
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -22,16 +177,24 @@ void main() async {
     ),
   );
 
-  // Initialize vault service
+  // Initialize foreground task
+  FlutterForegroundTask.initCommunicationPort();
+  _initForegroundTask();
+
   final vaultService = VaultService();
   await vaultService.init();
+
+  // Start foreground service if auto backup is enabled
+  if (vaultService.backupConfig.autoBackupEnabled &&
+      vaultService.backupConfig.isLoggedIn) {
+    await startAutoBackupService();
+  }
 
   runApp(OneShieldApp(vaultService: vaultService));
 }
 
 class OneShieldApp extends StatefulWidget {
   final VaultService vaultService;
-
   const OneShieldApp({super.key, required this.vaultService});
 
   @override
@@ -42,24 +205,21 @@ class _OneShieldAppState extends State<OneShieldApp>
     with WidgetsBindingObserver {
   final _navigatorKey = GlobalKey<NavigatorState>();
   DateTime? _pausedAt;
-
-  // Auto-lock after 30 seconds in background
   static const _autoLockDuration = Duration(seconds: 30);
-
-  // Auto backup scheduler
   Timer? _autoBackupTimer;
-  bool _isAutoBackupRunning = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // Start auto backup scheduler - checks every 60 seconds
+    // In-app: check every 60s while app is open
     _autoBackupTimer = Timer.periodic(
       const Duration(seconds: 60),
-      (_) => _checkAndRunAutoBackup(),
+      (_) => _checkAutoBackup(),
     );
+    // Check shortly after app start
+    Future.delayed(const Duration(seconds: 5), _checkAutoBackup);
   }
 
   @override
@@ -78,89 +238,43 @@ class _OneShieldAppState extends State<OneShieldApp>
       if (_pausedAt != null &&
           widget.vaultService.isUnlocked &&
           DateTime.now().difference(_pausedAt!) > _autoLockDuration) {
-        // Lock the vault and clear autofill credentials
         widget.vaultService.lock();
         AutofillBridge(vaultService: widget.vaultService).clearCredentials();
         _navigatorKey.currentState?.pushAndRemoveUntil(
           MaterialPageRoute(
-            builder: (_) =>
-                LoginScreen(vaultService: widget.vaultService),
+            builder: (_) => LoginScreen(vaultService: widget.vaultService),
           ),
           (_) => false,
         );
       }
       _pausedAt = null;
-
-      // Check auto backup when app resumes
-      _checkAndRunAutoBackup();
+      _checkAutoBackup();
     }
   }
 
-  /// Check if it's time for auto backup and run it silently.
-  /// Auto backup works regardless of vault lock state because
-  /// exported data is already encrypted in the database.
-  Future<void> _checkAndRunAutoBackup() async {
-    if (_isAutoBackupRunning) return;
-
-    final config = widget.vaultService.backupConfig;
-
-    // Check conditions: enabled + logged in to Drive
-    if (!config.autoBackupEnabled) return;
-    if (!config.isLoggedIn) return;
-
-    // Parse scheduled backup time (HH:mm format)
-    final now = DateTime.now();
-    final parts = config.backupTime.split(':');
-    if (parts.length != 2) return;
-    final scheduledHour = int.tryParse(parts[0]) ?? -1;
-    final scheduledMinute = int.tryParse(parts[1]) ?? -1;
-    if (scheduledHour < 0 || scheduledMinute < 0) return;
-
-    // Check if current time is at or past the scheduled time today
-    final scheduledToday = DateTime(now.year, now.month, now.day,
-        scheduledHour, scheduledMinute);
-    if (now.isBefore(scheduledToday)) return;
-
-
-    if (config.lastBackup != null) {
-      if (config.lastBackup!.isAfter(scheduledToday)) {
-        return; 
-      }
-    }
-
-    // Run auto backup silently
-    _isAutoBackupRunning = true;
-    try {
-      final driveService =
-          DriveBackupService(vaultService: widget.vaultService);
-      final success = await driveService.uploadBackupSimple();
-      if (success && mounted) {
-        // Show a brief notification via SnackBar
-        final ctx = _navigatorKey.currentContext;
-        if (ctx != null) {
-          ScaffoldMessenger.of(ctx).showSnackBar(
-            SnackBar(
-              content: const Row(
-                children: [
-                  Icon(Icons.cloud_done, color: Colors.white, size: 18),
-                  SizedBox(width: 8),
-                  Text('Auto backup completed'),
-                ],
-              ),
-              backgroundColor: AppTheme.accentGreen.withValues(alpha: 0.9),
-              duration: const Duration(seconds: 3),
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
+  Future<void> _checkAutoBackup() async {
+    final success = await AutoBackupHelper.runIfNeeded(widget.vaultService);
+    if (success && mounted) {
+      final ctx = _navigatorKey.currentContext;
+      if (ctx != null) {
+        ScaffoldMessenger.of(ctx).showSnackBar(
+          SnackBar(
+            content: const Row(
+              children: [
+                Icon(Icons.cloud_done, color: Colors.white, size: 18),
+                SizedBox(width: 8),
+                Text('Auto backup completed'),
+              ],
             ),
-          );
-        }
+            backgroundColor: AppTheme.accentGreen.withValues(alpha: 0.9),
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        );
       }
-    } catch (_) {
-      // Silent fail for auto backup
-    } finally {
-      _isAutoBackupRunning = false;
     }
   }
 

@@ -1,9 +1,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../core/constants.dart';
 import '../core/theme.dart';
+import '../main.dart' show startAutoBackupService, stopAutoBackupService;
 import '../services/vault_service.dart';
 import '../services/drive_backup_service.dart';
 import '../services/autofill_bridge.dart';
@@ -365,22 +367,27 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                   // Auto backup toggle
                   _buildSettingToggle(
                     'Auto Backup',
-                    'Backup automatically at ${backupConfig.backupTime}',
-                    Icons.schedule,
+                    'Daily automatic backup to Google Drive',
+                    Icons.cloud_sync_outlined,
                     backupConfig.autoBackupEnabled,
                     (value) async {
                       backupConfig.autoBackupEnabled = value;
                       await widget.vaultService.saveBackupConfig(backupConfig);
+                      if (value) {
+                        await startAutoBackupService();
+                        // Ask to disable battery optimization
+                        try {
+                          const platform = MethodChannel('com.oneshield.app/battery');
+                          final isIgnoring = await platform.invokeMethod<bool>('isIgnoringBatteryOptimizations');
+                          if (isIgnoring == false) {
+                            await platform.invokeMethod('requestIgnoreBatteryOptimizations');
+                          }
+                        } catch (_) {}
+                      } else {
+                        await stopAutoBackupService();
+                      }
                       setState(() {});
                     },
-                  ),
-                  const Divider(color: AppTheme.surfaceLight, height: 24),
-                  // Backup time selector
-                  _buildSettingAction(
-                    'Backup Time',
-                    backupConfig.backupTime,
-                    Icons.access_time,
-                    () => _selectBackupTime(),
                   ),
                   const Divider(color: AppTheme.surfaceLight, height: 24),
                   // Manual backup
@@ -968,28 +975,6 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
       }
     } catch (e) {
       _showSnackBar('Error reading backup file');
-    }
-  }
-
-  // --- Backup Time ---
-  Future<void> _selectBackupTime() async {
-    final config = widget.vaultService.backupConfig;
-    final parts = config.backupTime.split(':');
-    final initial = TimeOfDay(
-      hour: int.tryParse(parts[0]) ?? 2,
-      minute: int.tryParse(parts[1]) ?? 0,
-    );
-
-    final selected = await showTimePicker(
-      context: context,
-      initialTime: initial,
-    );
-
-    if (selected != null) {
-      config.backupTime =
-          '${selected.hour.toString().padLeft(2, '0')}:${selected.minute.toString().padLeft(2, '0')}';
-      await widget.vaultService.saveBackupConfig(config);
-      setState(() {});
     }
   }
 
