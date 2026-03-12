@@ -119,27 +119,38 @@ class VaultService {
     final migrationDone = await secureStorage.read(key: 'hive_encrypted_v1');
 
     if (migrationDone == 'true') {
-      // Already migrated, open encrypted boxes directly
-      _vaultBox = await Hive.openBox<VaultEntry>(
-        _vaultBoxName,
-        encryptionCipher: cipher,
+      // Already migrated, open encrypted boxes with recovery
+      _vaultBox = await _openBoxSafely<VaultEntry>(
+        _vaultBoxName, cipher,
       );
-      _configBox = await Hive.openBox<MasterConfig>(
-        _configBoxName,
-        encryptionCipher: cipher,
+      _configBox = await _openBoxSafely<MasterConfig>(
+        _configBoxName, cipher,
       );
-      _backupBox = await Hive.openBox<BackupConfig>(
-        _backupBoxName,
-        encryptionCipher: cipher,
+      _backupBox = await _openBoxSafely<BackupConfig>(
+        _backupBoxName, cipher,
       );
-      _deletedBox = await Hive.openBox<String>(
-        _deletedBoxName,
-        encryptionCipher: cipher,
+      _deletedBox = await _openBoxSafely<String>(
+        _deletedBoxName, cipher,
       );
     } else {
       // First time with encryption: try to migrate old data
       await _migrateToEncryptedBoxes(cipher);
       await secureStorage.write(key: 'hive_encrypted_v1', value: 'true');
+    }
+  }
+
+  /// Safely open a Hive box with automatic recovery on corruption/schema mismatch
+  static Future<Box<T>> _openBoxSafely<T>(
+    String boxName, HiveAesCipher cipher,
+  ) async {
+    try {
+      return await Hive.openBox<T>(boxName, encryptionCipher: cipher);
+    } catch (e) {
+      // Box is corrupted or schema changed — delete and recreate
+      try {
+        await Hive.deleteBoxFromDisk(boxName);
+      } catch (_) {}
+      return await Hive.openBox<T>(boxName, encryptionCipher: cipher);
     }
   }
 

@@ -1350,40 +1350,55 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
 
   Widget _buildCopyStepRow(String prefix, String folderName) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 2),
+      padding: const EdgeInsets.only(bottom: 4),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            prefix,
-            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-            decoration: BoxDecoration(
-              color: AppTheme.primaryDark,
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: AppTheme.surfaceLight),
-            ),
+          Flexible(
             child: Text(
-              folderName,
-              style: const TextStyle(
-                color: AppTheme.accentCyan,
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                fontFamily: 'monospace',
-              ),
+              prefix,
+              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
-          const SizedBox(width: 4),
-          InkWell(
+          GestureDetector(
             onTap: () {
               Clipboard.setData(ClipboardData(text: folderName));
-              _showSnackBar('Copied: $folderName');
+              ScaffoldMessenger.of(context).clearSnackBars();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Copied "$folderName"', style: const TextStyle(fontSize: 13)),
+                  behavior: SnackBarBehavior.floating,
+                  backgroundColor: AppTheme.accentGreen.withValues(alpha: 0.9),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  margin: const EdgeInsets.all(16),
+                  duration: const Duration(seconds: 2),
+                ),
+              );
             },
-            borderRadius: BorderRadius.circular(4),
-            child: const Padding(
-              padding: EdgeInsets.all(4),
-              child: Icon(Icons.copy, size: 14, color: AppTheme.accentCyan),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryDark,
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: AppTheme.accentCyan.withValues(alpha: 0.4)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    folderName,
+                    style: const TextStyle(
+                      color: AppTheme.accentCyan,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.copy, size: 12, color: AppTheme.accentCyan),
+                ],
+              ),
             ),
           ),
         ],
